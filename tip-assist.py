@@ -3,6 +3,8 @@ from dataclasses import dataclass
 SCRIPT_NAME = 'tip-assist'
 EXIT_COMMANDS = set(['quit', 'exit'])
 INFO_COMMANDS = set(['info'])
+ADD_COMMANDS = set(['add'])
+REMOVE_COMMANDS = set(['remove', 'rem', 'rm'])
 EMPLOYEE_KEYWORDS = set(['employee', 'employees'])
 
 #region data classes
@@ -66,7 +68,7 @@ def add_employees():
         if tokenized_name[0] == 'done':
             done = True
         elif len(tokenized_name) != 2:
-            print('INVALID NAME FORMAT')
+            print('unrecognized name format')
         else:
             employees.append(employee_t(
                 last_name= tokenized_name[0].strip(),
@@ -80,23 +82,30 @@ def remove_employees():
     while not done:
         print('Employee list: ')
         display_employees()
-        print('Enter the employee number to remove')
+        print('Enter the employee index to remove')
         print('or "done" to finish')
         is_invalid_command = False
+        invalid_reason = ''
         raw_str = input('> ')
         tokenized_input = raw_str.strip().split()
-        if tokenized_input[0] == 'done':
+        if tokenized_input[0] == 'done': #exit
             done = True
+        # get index to remove
         elif tokenized_input[0].isdigit():
             employee_index = int(tokenized_input[0]) - 1
+            # check boundary
             if employee_index >= 0 and employee_index < len(employees):
                 employees.pop(employee_index)
             else:
                 is_invalid_command = True
+                invalid_reason = 'index out of bound'
         else:
             is_invalid_command = True
+            invalid_reason = f'{tokenized_input[0]} is not a digit'
         if is_invalid_command:
-            print('INVALID EMPLOYEE INDEX')
+            print('ERROR: ' + invalid_reason)
+            print()
+
 
 # main
 if __name__ == '__main__':
@@ -112,24 +121,28 @@ if __name__ == '__main__':
         command = tokenized_input[0]
         arguments = tokenized_input[1:]
         is_invalid_command = False
+        invalid_command_reason = ''
         # process commands
         if command in EXIT_COMMANDS:
             quit = True
             continue
         elif command in INFO_COMMANDS:
             display_employees()
-        elif command == 'add':
+        elif command in ADD_COMMANDS:
             if arguments[0] in EMPLOYEE_KEYWORDS:
                 add_employees()
             else:
                 is_invalid_command = True
-        elif command == 'remove':
+                invalid_command_reason = f'unknown argument "{arguments[0]}"'
+        elif command in REMOVE_COMMANDS:
             if arguments[0] in EMPLOYEE_KEYWORDS:
                 remove_employees()
             else:
                 is_invalid_command = True
+                invalid_command_reason = f'unknown argument "{arguments[0]}"'
         else:
             is_invalid_command = True
-        # detecting invalid commands
+            invalid_command_reason = f'command not found "{command}"'
+        # print invalid command message
         if is_invalid_command:
-            print('Invalid command')
+            print('Invalid command: ' + invalid_command_reason)
