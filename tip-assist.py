@@ -5,6 +5,7 @@ import os.path
 SCRIPT_NAME = 'tip-assist'
 SAVEFILE_HEADER = ['last_name', 'first_name', 'hours']
 SAVEFILE_NAME = 'session.csv'
+ALLOWED_FUDGE_FACTOR = .02
 # commands and keywords
 EXIT_COMMANDS = set(['quit', 'exit'])
 INFO_COMMANDS = set(['info', 'help'])
@@ -13,7 +14,9 @@ ADD_COMMANDS = set(['add'])
 SET_COMMANDS = set(['set'])
 UPDATE_COMMANDS = set(['update'])
 REMOVE_COMMANDS = set(['remove', 'rem', 'rm'])
+DIST_COMMANDS = set(['dist', 'distribute', 'run'])
 EMPLOYEE_KEYWORDS = set(['employee', 'employees'])
+CASH_KEYWORDS = set(['cash', 'tip', 'tips'])
 HOUR_KEYWORDS = set(['hour', 'hr', 'hours', 'hrs'])
 DONE_KEYWORDS = set(['done', ''])
 
@@ -23,7 +26,9 @@ class employee_t:
     last_name: str
     first_name: str
     tippable_hrs: float = 0.0
-    tip_rate: float = 0.0
+    tip_rate: float = 0.
+    def __hash__(self):
+        return hash((self.last_name, self.first_name))
 
 @dataclass
 class cash_denomination:
@@ -43,22 +48,36 @@ five_dollar = cash_denomination("five(s)", 5_00)
 ten_dollar = cash_denomination("ten(s)", 10_00)
 twenty_dollar = cash_denomination("twenty(ies)", 20_00)
 
-default_stack = {
-    penny: 0,
-    nickel: 0,
-    dime: 0,
-    quarter: 0,
-    one_dollar: 0,
-    five_dollar: 0,
-    ten_dollar: 0,
-    twenty_dollar: 0
-}
+class cash_stack:
+    def __init__(self):
+        self.pool = {
+            penny: 0,
+            nickel: 0,
+            dime: 0,
+            quarter: 0,
+            one_dollar: 0,
+            five_dollar: 0,
+            ten_dollar: 0,
+            twenty_dollar: 0
+        }
+    def total(self):
+        total_value = 0
+        for denom, n in self.pool.items():
+            total_value += denom.value * n
+        return total_value
+    def copy(self):
+        new_stack = cash_stack()
+        for denom in self.pool.keys():
+            new_stack.pool[denom] = self.pool[denom]
+        return new_stack
+
 #endregion
 
 # global state
 employee_list = []
 total_hours = 0.0
-tips = []
+tip_pool = cash_stack()
+tip_distribution = dict()
 
 def sort_employees():
     employee_list.sort(key=lambda e: f'{e.last_name}, {e.first_name}')
@@ -132,6 +151,7 @@ def remove_employees():
             print()
 #endregion
 
+#region tip management
 def set_tippable_hrs():
     global employee_list
     # set tippable hrs
@@ -150,6 +170,84 @@ def set_tippable_hrs():
                 print(f'Unrecognized number {raw_input}')
     # set tip percent
     calc_tip_rate()
+
+def calc_total_tips():
+    total_value = 0
+    for denom, count in tip_pool.pool.items():
+        total_value += denom.value * count
+    return total_value
+
+def set_cash():
+    global tip_pool
+    for denomination in sorted(tip_pool.pool.keys(), key=lambda d: d.value):
+        print(f'Set number of {denomination.name}:')
+        while True:
+            raw_input = input('Enter count: ').strip()
+            if raw_input == '':
+                tip_pool.pool[denomination] = 0
+                break
+            try:
+                count = int(raw_input)
+                tip_pool.pool[denomination] = count
+                break
+            except ValueError:
+                print(f'Unrecognized number {raw_input}')
+    print(f'Cash set! Total Value: ${calc_total_tips()/100:.2f}')
+
+def calc_cash_distribution():
+    if total_hours == 0:
+        print(f'Unable to distribute tips with no hours')
+        return
+    total_tip = tip_pool.total()
+    tip_dist_target = {
+        e: e.tip_rate * total_tip for e in employee_list
+    } # to calc discrepency at the end
+    working_dist = {
+        e: cash_stack() for e in employee_list
+    }
+    tip_dist_remaining = {
+        e: round(e.tip_rate * total_tip) for e in employee_list
+    }
+    remaining_tip_pool = tip_pool.copy()
+    remainder_pool = cash_stack()
+    # initial lousy pass
+    while sum(remaining_tip_pool.pool.values()) > 0:
+        # find highest available denom
+        positive_denoms = {
+            d: v for d, v in remaining_tip_pool.pool.items() if v > 0
+        }
+        largest_positive_denom = sorted(
+            positive_denoms.keys(),
+            key=lambda d: -d.value
+        )[0]
+        # greedily find employee to dist tip
+        feasible_list = [
+            e for e in employee_list if
+            (tip_dist_remaining[e] - largest_positive_denom.value) > 0.0
+        ]
+        if len(feasible_list) > 0:
+            greedy_emp_choice = sorted(
+                feasible_list, key=lambda e: -tip_dist_remaining[e]
+            )[0]
+            # remove denom from emp remaining
+            tip_dist_remaining[greedy_emp_choice] -= largest_positive_denom.value
+            remaining_tip_pool.pool[largest_positive_denom] -= 1
+            # add tip to working dist
+            working_dist[greedy_emp_choice].pool[largest_positive_denom] += 1
+        else: #if denom can't fit, add to remainder pool
+            remainder_pool.pool[largest_positive_denom] = remaining_tip_pool.pool[largest_positive_denom]
+            remaining_tip_pool.pool[largest_positive_denom] = 0
+    for e in employee_list:
+        recieved_tip = working_dist[e].total()
+        diff_to_ideal = recieved_tip - tip_dist_target[e]
+        print(f'Employee {e.first_name:<7} {e.last_name:<7} will recieve ${recieved_tip/100:.2f} in tips')
+        print(f'${diff_to_ideal/100:.5f} away from ideal')
+    total_distributed_tip = sum(working_dist[e].total() for e in employee_list)
+    print(f'${total_distributed_tip/100:.2f} distributed with ${remainder_pool.total()/100:.2f} remaining in the pool')
+    global tip_distribution
+    tip_distribution = working_dist
+
+#endregion
 
 #region file IO
 def load_session_from_file(filename):
@@ -228,9 +326,13 @@ if __name__ == '__main__':
         elif command in SET_COMMANDS:
             if arguments[0] in HOUR_KEYWORDS:
                 set_tippable_hrs()
+            elif arguments[0] in CASH_KEYWORDS:
+                set_cash()
             else:
                 is_invalid_command = True
                 invalid_command_reason = f'unknown argument "{arguments[0]}"'
+        elif command in DIST_COMMANDS:
+            calc_cash_distribution()
         else:
             is_invalid_command = True
             invalid_command_reason = f'command not found "{command}"'
