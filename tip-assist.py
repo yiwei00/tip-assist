@@ -3,8 +3,10 @@ import csv
 import os.path
 # constants
 SCRIPT_NAME = 'tip-assist'
-SAVEFILE_HEADER = ['last_name', 'first_name', 'hours']
-SAVEFILE_NAME = 'session.csv'
+EMP_SAVEFILE_HEADER = ['last_name', 'first_name', 'hours']
+EMPLOYEE_SAVEFILE = 'employees.csv'
+CASH_SAVEFILE_HEADER = ['denomination', 'quantity']
+CASH_SAVEFILE = 'tips.csv'
 ALLOWED_FUDGE_FACTOR = .02
 # commands and keywords
 EXIT_COMMANDS = set(['quit', 'exit'])
@@ -48,6 +50,11 @@ five_dollar = cash_denomination("five(s)", 5_00)
 ten_dollar = cash_denomination("ten(s)", 10_00)
 twenty_dollar = cash_denomination("twenty(ies)", 20_00)
 
+denom_list = [
+    penny, nickel, dime, quarter, half_dollar, one_dollar, two_dollar,
+    five_dollar, ten_dollar, twenty_dollar
+]
+
 class cash_stack:
     def __init__(self):
         self.pool = {
@@ -70,6 +77,12 @@ class cash_stack:
         for denom in self.pool.keys():
             new_stack.pool[denom] = self.pool[denom]
         return new_stack
+    def display(self):
+        print(f'{"Denomination":<15} {"Quantity":<8} {"Value":>8}')
+        for denom in sorted(self.pool.keys(), key=lambda d: d.value):
+            count = self.pool[denom]
+            print(f'{denom.name:<15} {count:>8} {f"${count * denom.value * 1e-2:.2f}":>8}')
+        print(f'Total tips: ${self.total()/100:.2f}')
 
 #endregion
 
@@ -89,7 +102,6 @@ def calc_tip_rate():
         total_hours += e.tippable_hrs
     for e in employee_list:
         e.tip_rate = 0.0 if total_hours == 0 else e.tippable_hrs/total_hours
-
 
 #region employee list management
 def display_employees():
@@ -237,6 +249,7 @@ def calc_cash_distribution():
         else: #if denom can't fit, add to remainder pool
             remainder_pool.pool[largest_positive_denom] = remaining_tip_pool.pool[largest_positive_denom]
             remaining_tip_pool.pool[largest_positive_denom] = 0
+    # display tip split
     for e in employee_list:
         recieved_tip = working_dist[e].total()
         diff_to_ideal = recieved_tip - tip_dist_target[e]
@@ -250,11 +263,12 @@ def calc_cash_distribution():
 #endregion
 
 #region file IO
-def load_session_from_file(filename):
+def load_employees_from_file(filename):
+    # employee list
     global employee_list
     employee_list = []
     with open(filename, 'r') as csvfile:
-        savefile_reader = csv.DictReader(csvfile, SAVEFILE_HEADER)
+        savefile_reader = csv.DictReader(csvfile, EMP_SAVEFILE_HEADER)
         for employee in savefile_reader:
             print(f'adding {employee['first_name']}')
             new_employee = employee_t(
@@ -266,9 +280,9 @@ def load_session_from_file(filename):
     sort_employees()
     calc_tip_rate()
 
-def save_session_to_file(filename):
+def save_employees_to_file(filename):
     with open(filename, 'w') as csvfile:
-        savefile_writer = csv.DictWriter(csvfile, SAVEFILE_HEADER)
+        savefile_writer = csv.DictWriter(csvfile, EMP_SAVEFILE_HEADER)
         for employee in employee_list:
             new_entry = {
                 'last_name': employee.last_name,
@@ -276,13 +290,39 @@ def save_session_to_file(filename):
                 'hours': employee.tippable_hrs
             }
             savefile_writer.writerow(new_entry)
+
+def load_tips_from_file(filename):
+    global tip_pool
+    tip_pool = cash_stack()
+    with open(filename, 'r') as csvfile:
+        savefile_reader = csv.DictReader(csvfile, CASH_SAVEFILE_HEADER)
+        for row in savefile_reader:
+            matches = [d for d in denom_list if d.name == row['denomination']]
+            if len(matches) < 0:
+                raise 'unknown denomination'
+            denom = matches[0]
+            tip_pool.pool[denom] = int(row['quantity'])
+
+def save_tips_to_file(filename):
+    with open(filename, 'w') as csvfile:
+        savefile_writer = csv.DictWriter(csvfile, CASH_SAVEFILE_HEADER)
+        for denom in tip_pool.pool.keys():
+            new_entry = {
+                'denomination': denom.name,
+                'quantity': tip_pool.pool[denom]
+            }
+            savefile_writer.writerow(new_entry)
 #endregion file IO
 
 #region main function
 if __name__ == '__main__':
     # attempt to load session from file
-    if os.path.isfile(SAVEFILE_NAME):
-        load_session_from_file(SAVEFILE_NAME)
+    if os.path.isfile(EMPLOYEE_SAVEFILE):
+        load_employees_from_file(EMPLOYEE_SAVEFILE)
+    if os.path.isfile(CASH_SAVEFILE):
+        load_tips_from_file(CASH_SAVEFILE)
+        if len(employee_list) > 0:
+            calc_cash_distribution()
     quit = False
     while not quit:
         # read stdin
@@ -304,7 +344,13 @@ if __name__ == '__main__':
         elif command in INFO_COMMANDS:
             display_employees()
         elif command in LIST_COMMANDS:
-            display_employees()
+            if arg_count <= 0:
+                display_employees()
+            elif arg_count == 1:
+                if len(tip_distribution) > 0:
+                    for e in employee_list:
+                        if e.first_name == arguments[0].upper():
+                            tip_distribution[e].display()
         elif command in ADD_COMMANDS:
             if arg_count < 1:
                 is_invalid_command = True
@@ -340,5 +386,7 @@ if __name__ == '__main__':
         if is_invalid_command:
             print('Invalid command: ' + invalid_command_reason)
     # save session to file
-    save_session_to_file(SAVEFILE_NAME)
+    save_employees_to_file(EMPLOYEE_SAVEFILE)
+    if tip_pool.total() > 0:
+        save_tips_to_file(CASH_SAVEFILE)
 #endregion
