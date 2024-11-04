@@ -22,6 +22,17 @@ CASH_KEYWORDS = set(['cash', 'tip', 'tips'])
 HOUR_KEYWORDS = set(['hour', 'hr', 'hours', 'hrs'])
 DONE_KEYWORDS = set(['done', ''])
 
+HELP_TEXT = '''Welcome to Tip Assist
+List of Commands:
+----------------------------
+help - Prints this menu
+exit - Quits script
+list <employee first name> - list tip distribution for employee
+add {employee} - adds employees
+remove {employee} - removes employees
+set {cash, hours} - sets hours for employee or cash for pool
+distribute - calculates cash distribution'''
+
 #region data classes
 @dataclass
 class employee_t:
@@ -206,9 +217,10 @@ def set_cash():
                 print(f'Unrecognized number {raw_input}')
     print(f'Cash set! Total Value: ${calc_total_tips()/100:.2f}')
 
-def calc_cash_distribution():
+def calc_cash_distribution(verbose=False):
     if total_hours == 0:
-        print(f'Unable to distribute tips with no hours')
+        if verbose:
+            print(f'Unable to distribute tips with no hours')
         return
     total_tip = tip_pool.total()
     tip_dist_target = {
@@ -253,10 +265,12 @@ def calc_cash_distribution():
     for e in employee_list:
         recieved_tip = working_dist[e].total()
         diff_to_ideal = recieved_tip - tip_dist_target[e]
-        print(f'Employee {e.first_name:<7} {e.last_name:<7} will recieve ${recieved_tip/100:.2f} in tips')
-        print(f'${diff_to_ideal/100:.5f} away from ideal')
+        if verbose:
+            print(f'Employee {e.first_name:<7} {e.last_name:<7} will recieve ${recieved_tip/100:.2f} in tips')
+            print(f'${diff_to_ideal/100:.5f} away from ideal')
     total_distributed_tip = sum(working_dist[e].total() for e in employee_list)
-    print(f'${total_distributed_tip/100:.2f} distributed with ${remainder_pool.total()/100:.2f} remaining in the pool')
+    if verbose:
+        print(f'${total_distributed_tip/100:.2f} distributed with ${remainder_pool.total()/100:.2f} remaining in the pool')
     global tip_distribution
     tip_distribution = working_dist
 
@@ -270,7 +284,6 @@ def load_employees_from_file(filename):
     with open(filename, 'r') as csvfile:
         savefile_reader = csv.DictReader(csvfile, EMP_SAVEFILE_HEADER)
         for employee in savefile_reader:
-            print(f'adding {employee['first_name']}')
             new_employee = employee_t(
                 last_name=employee['last_name'],
                 first_name=employee['first_name'],
@@ -324,6 +337,7 @@ if __name__ == '__main__':
         if len(employee_list) > 0:
             calc_cash_distribution()
     quit = False
+    print(HELP_TEXT)
     while not quit:
         # read stdin
         raw_str = input(f'{SCRIPT_NAME}> ')
@@ -342,7 +356,7 @@ if __name__ == '__main__':
             quit = True
             continue
         elif command in INFO_COMMANDS:
-            display_employees()
+            print(HELP_TEXT)
         elif command in LIST_COMMANDS:
             if arg_count <= 0:
                 display_employees()
@@ -378,13 +392,14 @@ if __name__ == '__main__':
                 is_invalid_command = True
                 invalid_command_reason = f'unknown argument "{arguments[0]}"'
         elif command in DIST_COMMANDS:
-            calc_cash_distribution()
+            calc_cash_distribution(verbose=True)
         else:
             is_invalid_command = True
             invalid_command_reason = f'command not found "{command}"'
         # print invalid command message
         if is_invalid_command:
             print('Invalid command: ' + invalid_command_reason)
+            print('Enter \'help\' to see a list of commands')
     # save session to file
     save_employees_to_file(EMPLOYEE_SAVEFILE)
     if tip_pool.total() > 0:
